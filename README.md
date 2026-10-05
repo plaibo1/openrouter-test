@@ -15,13 +15,21 @@ npm start              # http://localhost:3000
 
 ## Docker
 
-Проще всего через compose — он сам передаст переменные из `.env` в контейнер:
+Локально через compose (переменные берутся из `.env`):
 
 ```bash
 cp .env.example .env   # вписать OPENROUTER_API_KEY
-docker compose up -d --build          # http://localhost:3000
-HOST_PORT=8080 docker compose up -d   # другой внешний порт
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build   # http://localhost:3000
 ```
+
+Другой внешний порт: `HOST_PORT=8080 docker compose -f docker-compose.yml -f docker-compose.local.yml up -d`.
+
+### Dokploy
+
+Тип приложения Docker Compose, файл `docker-compose.yml` (порт наружу не публикуется, это задача Traefik).
+1. Environment: `OPENROUTER_API_KEY=...` (и при желании `SUMMARY_MODEL=...`).
+2. Domains: сервис `app`, Container Port `3000`.
+3. Deploy.
 
 Или вручную:
 

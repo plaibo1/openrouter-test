@@ -30,7 +30,7 @@ if (!API_KEY) {
 const app = express();
 const upload = multer({ dest: path.join(os.tmpdir(), 'whisper-uploads'), limits: { fileSize: 1024 * 1024 * 1024 } });
 
-app.use(express.static('public'));
+app.use(express.static(path.join(import.meta.dirname, 'public')));
 
 function run(cmd, args) {
   return new Promise((resolve, reject) => {

@@ -1,0 +1,6 @@
+# Локальный запуск с пробросом порта:
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+services:
+  app:
+    ports:
+      - "${HOST_PORT:-3000}:3000"

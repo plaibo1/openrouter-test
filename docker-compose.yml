@@ -3,11 +3,14 @@ services:
     build: .
     image: openrouter-stt
     restart: unless-stopped
-    # Переменные из .env (OPENROUTER_API_KEY, SUMMARY_MODEL) передаются в контейнер при запуске,
-    # в образ они не попадают
-    env_file: .env
-    # Внутри контейнера всегда 3000; наружу — HOST_PORT из окружения или 3000
+    # Переменные (OPENROUTER_API_KEY, SUMMARY_MODEL) передаются в контейнер при запуске, в образ не попадают.
+    # Dokploy записывает переменные из вкладки Environment в .env рядом с compose-файлом.
+    env_file:
+      - path: .env
+        required: false
     environment:
       PORT: 3000
-    ports:
-      - "${HOST_PORT:-3000}:3000"
+    # Порт наружу не публикуем: в Dokploy трафик к контейнеру ведёт Traefik через домен.
+    # Для локального запуска см. docker-compose.local.yml
+    expose:
+      - "3000"

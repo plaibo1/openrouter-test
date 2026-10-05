@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { fetch, ProxyAgent } from 'undici';
+import { fetch, ProxyAgent, Socks5ProxyAgent } from 'undici';
 
 // docker --env-file, в отличие от node --env-file, не снимает кавычки: KEY="..." приходит вместе с ними
 const env = (name) => process.env[name]?.trim().replace(/^(["'])(.*)\1$/, '$2') || undefined;
@@ -21,15 +21,25 @@ const SUMMARY_MODELS = [
 const PORT = env('PORT') || 3000;
 
 // Прокси для запросов к OpenRouter (например, если сервер в регионе, который OpenRouter блокирует).
-// Формат: http://user:pass@host:port, socks не поддерживается; также принимается host:port:user:pass
+// Тип задаётся схемой: http://user:pass@host:port или socks5://user:pass@host:port.
+// Также принимается формат host:port:user:pass (со схемой впереди или без; без схемы — http)
 function proxyUrl(raw) {
   if (!raw) return null;
-  if (raw.includes('://')) return raw;
-  const [host, port, user, pass] = raw.split(':');
-  return user ? `http://${encodeURIComponent(user)}:${encodeURIComponent(pass)}@${host}:${port}` : `http://${host}:${port}`;
+  const [, scheme = 'http', rest] = raw.match(/^(?:(\w+):\/\/)?(.*)$/);
+  // host:port или host:port:user:pass (в пароле может быть что угодно, включая : и @)
+  const m = rest.match(/^([^:/@]+):(\d+)(?::([^:]*):(.*))?$/);
+  if (!m) return `${scheme}://${rest}`;
+  const [, host, port, user, pass] = m;
+  const auth = user ? `${encodeURIComponent(user)}:${encodeURIComponent(pass)}@` : '';
+  return `${scheme}://${auth}${host}:${port}`;
 }
 const PROXY = proxyUrl(env('OPENROUTER_PROXY'));
-const dispatcher = PROXY ? new ProxyAgent(PROXY) : undefined;
+const proxyProtocol = PROXY && new URL(PROXY).protocol;
+const dispatcher = !PROXY
+  ? undefined
+  : proxyProtocol === 'socks5:' || proxyProtocol === 'socks:'
+    ? new Socks5ProxyAgent(PROXY)
+    : new ProxyAgent(PROXY);
 // OpenRouter режет запрос к провайдеру по таймауту 60с, поэтому длинное аудио режем на куски
 const CHUNK_SECONDS = 600;
 const CONCURRENCY = 3;
@@ -81,7 +91,12 @@ async function request(url, options) {
     return await fetch(url, { ...options, dispatcher });
   } catch (e) {
     const reason = e.cause?.cause?.message || e.cause?.message || e.message;
-    throw new Error(`Сетевая ошибка${PROXY ? ' (через прокси)' : ''}: ${reason}`);
+    // SOCKS-прокси, указанный без схемы (т.е. как http), отвечает не по протоколу HTTP
+    const hint =
+      proxyProtocol === 'http:' && /does not match the HTTP/i.test(reason)
+        ? '. Похоже, это SOCKS5-прокси — укажи OPENROUTER_PROXY=socks5://host:port:user:pass'
+        : '';
+    throw new Error(`Сетевая ошибка${PROXY ? ' (через прокси)' : ''}: ${reason}${hint}`);
   }
 }
 
@@ -236,5 +251,5 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`http://localhost:${PORT}`);
-  if (PROXY) console.log(`OpenRouter через прокси ${new URL(PROXY).host}`);
+  if (PROXY) console.log(`OpenRouter через прокси ${proxyProtocol}//${new URL(PROXY).host}`);
 });

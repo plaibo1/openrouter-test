@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "express": "^5.2.1",
-    "multer": "^2.4.0"
+    "multer": "^2.4.0",
+    "undici": "^8.11.2"
   }
 }

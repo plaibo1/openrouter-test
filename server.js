@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fetch, ProxyAgent } from 'undici';
 
 // docker --env-file, в отличие от node --env-file, не снимает кавычки: KEY="..." приходит вместе с ними
 const env = (name) => process.env[name]?.trim().replace(/^(["'])(.*)\1$/, '$2') || undefined;
@@ -18,6 +19,17 @@ const SUMMARY_MODELS = [
   ),
 ];
 const PORT = env('PORT') || 3000;
+
+// Прокси для запросов к OpenRouter (например, если сервер в регионе, который OpenRouter блокирует).
+// Формат: http://user:pass@host:port, socks не поддерживается; также принимается host:port:user:pass
+function proxyUrl(raw) {
+  if (!raw) return null;
+  if (raw.includes('://')) return raw;
+  const [host, port, user, pass] = raw.split(':');
+  return user ? `http://${encodeURIComponent(user)}:${encodeURIComponent(pass)}@${host}:${port}` : `http://${host}:${port}`;
+}
+const PROXY = proxyUrl(env('OPENROUTER_PROXY'));
+const dispatcher = PROXY ? new ProxyAgent(PROXY) : undefined;
 // OpenRouter режет запрос к провайдеру по таймауту 60с, поэтому длинное аудио режем на куски
 const CHUNK_SECONDS = 600;
 const CONCURRENCY = 3;
@@ -63,8 +75,18 @@ async function toMp3Chunks(inputPath, workDir) {
   return chunks;
 }
 
+// undici при сетевой ошибке пишет просто "fetch failed", а причину (например, 407 от прокси) прячет в cause
+async function request(url, options) {
+  try {
+    return await fetch(url, { ...options, dispatcher });
+  } catch (e) {
+    const reason = e.cause?.cause?.message || e.cause?.message || e.message;
+    throw new Error(`Сетевая ошибка${PROXY ? ' (через прокси)' : ''}: ${reason}`);
+  }
+}
+
 async function openrouter(endpoint, body) {
-  const res = await fetch(`https://openrouter.ai/api/v1/${endpoint}`, {
+  const res = await request(`https://openrouter.ai/api/v1/${endpoint}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -134,7 +156,7 @@ let sttModelsCache = null;
 app.get('/api/models', async (req, res) => {
   try {
     if (!sttModelsCache) {
-      const r = await fetch('https://openrouter.ai/api/v1/models?output_modalities=transcription');
+      const r = await request('https://openrouter.ai/api/v1/models?output_modalities=transcription');
       if (!r.ok) throw new Error(`OpenRouter models ${r.status}`);
       sttModelsCache = (await r.json()).data
         .map((m) => ({ id: m.id, name: m.name }))
@@ -212,4 +234,7 @@ app.post('/api/transcribe', upload.single('file'), async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`http://localhost:${PORT}`));
+app.listen(PORT, () => {
+  console.log(`http://localhost:${PORT}`);
+  if (PROXY) console.log(`OpenRouter через прокси ${new URL(PROXY).host}`);
+});

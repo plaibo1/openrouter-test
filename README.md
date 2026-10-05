@@ -28,6 +28,8 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build  
 
 Тип приложения Docker Compose, файл `docker-compose.yml` (порт наружу не публикуется, это задача Traefik).
 1. Environment: `OPENROUTER_API_KEY=...` (и при желании `SUMMARY_MODEL=...`).
+   Если сервер в регионе, который OpenRouter блокирует (ответ 403 `Access denied by security policy`), —
+   `OPENROUTER_PROXY=...`; в логе при старте появится `OpenRouter через прокси host:port`.
 2. Domains: сервис `app`, Container Port `3000`.
 3. Deploy.
 
@@ -44,6 +46,7 @@ docker run -d -p 3000:3000 -e OPENROUTER_API_KEY=sk-or-v1-... openrouter-stt
 |---|---|---|
 | `OPENROUTER_API_KEY` | да | ключ OpenRouter |
 | `SUMMARY_MODEL` | нет | модель суммари по умолчанию; не задана — суммари выключено (включается в UI) |
+| `OPENROUTER_PROXY` | нет | HTTP-прокси для запросов к OpenRouter: `host:port:user:pass` или `http://user:pass@host:port` (SOCKS не поддерживается) |
 | `PORT` | нет | порт внутри контейнера, по умолчанию 3000 |
 
 Можно и `docker run --env-file .env ...`. Если в `.env` задан `PORT`, сервер в контейнере

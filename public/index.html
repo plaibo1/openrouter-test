@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>STT Playground</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+  <main class="max-w-7xl mx-auto px-4 py-8">
+    <header class="mb-6">
+      <h1 class="text-2xl font-semibold">Транскрибация аудио и видео</h1>
+      <p class="text-sm text-slate-500">Модели распознавания речи через OpenRouter</p>
+    </header>
+
+    <div class="grid gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] items-start">
+      <!-- Левая колонка: ввод -->
+      <div class="space-y-4 lg:sticky lg:top-6">
+        <form id="form" class="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-4">
+          <label id="drop" for="file"
+            class="flex flex-col items-center justify-center gap-1 border-2 border-dashed border-slate-300 rounded-lg p-6 cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/40 transition text-center">
+            <span class="font-medium">Перетащи файл сюда или кликни</span>
+            <span id="fileName" class="text-sm text-slate-500 break-all">mp3, wav, m4a, ogg, mp4, mov, webm…</span>
+            <input id="file" type="file" accept="audio/*,video/*" class="hidden" />
+          </label>
+
+          <div class="grid gap-3 sm:grid-cols-2">
+            <label class="block sm:col-span-2">
+              <span class="text-xs font-medium text-slate-500">Модель распознавания</span>
+              <select id="sttModel" class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white">
+                <option>загрузка…</option>
+              </select>
+            </label>
+            <label class="block">
+              <span class="text-xs font-medium text-slate-500">Модель для суммари</span>
+              <select id="summaryModel" class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white"></select>
+            </label>
+            <label class="block">
+              <span class="text-xs font-medium text-slate-500">Язык</span>
+              <select id="language" class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white">
+                <option value="">Автоопределение</option>
+                <option value="ru">Русский</option>
+                <option value="en">English</option>
+                <option value="de">Deutsch</option>
+                <option value="es">Español</option>
+              </select>
+            </label>
+          </div>
+
+          <button id="submit" type="submit" disabled
+            class="w-full bg-indigo-600 text-white rounded-lg px-5 py-2.5 text-sm font-medium disabled:opacity-40 hover:bg-indigo-700">
+            Транскрибировать
+          </button>
+        </form>
+
+        <div id="playerWrap" class="hidden bg-white rounded-xl shadow-sm border border-slate-200 p-3"></div>
+      </div>
+
+      <!-- Правая колонка: результат -->
+      <section id="output" class="space-y-4 scroll-mt-4">
+        <div id="placeholder" class="bg-white/60 rounded-xl border border-dashed border-slate-300 p-10 text-center text-slate-400 text-sm">
+          Выбери файл и нажми «Транскрибировать» — результат появится здесь
+        </div>
+
+        <div id="loading" class="hidden bg-white rounded-xl shadow-sm border border-slate-200 p-10 text-center">
+          <div class="mx-auto h-8 w-8 rounded-full border-4 border-indigo-200 border-t-indigo-600 animate-spin"></div>
+          <p id="loadingText" class="mt-3 text-sm text-slate-500">Обработка…</p>
+        </div>
+
+        <div id="error" class="hidden bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm whitespace-pre-wrap break-words"></div>
+
+        <div id="result" class="hidden space-y-4">
+          <div id="stats" class="flex flex-wrap gap-2 text-xs"></div>
+
+          <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+            <h2 class="font-semibold mb-2">Суммари</h2>
+            <div id="summary" class="text-sm leading-relaxed space-y-2"></div>
+          </div>
+
+          <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+            <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
+              <h2 class="font-semibold">Тайминги</h2>
+              <div class="flex gap-2 text-sm">
+                <button data-dl="srt" class="border border-slate-300 rounded-lg px-3 py-1 hover:bg-slate-100">.srt</button>
+                <button data-dl="txt" class="border border-slate-300 rounded-lg px-3 py-1 hover:bg-slate-100">.txt</button>
+                <button id="copy" class="border border-slate-300 rounded-lg px-3 py-1 hover:bg-slate-100">Копировать текст</button>
+              </div>
+            </div>
+            <div id="noTs" class="hidden mb-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-3 text-sm">
+              Эта модель не отдаёт тайминги (verbose_json не поддерживается) — доступен только текст.
+            </div>
+            <ol id="segments" class="divide-y divide-slate-100 max-h-[32rem] overflow-y-auto"></ol>
+          </div>
+
+          <details class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+            <summary class="font-semibold cursor-pointer">Полный текст</summary>
+            <p id="text" class="mt-3 text-sm leading-relaxed whitespace-pre-wrap"></p>
+          </details>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let file = null;
+    let data = null;
+    let media = null;
+
+    const fmt = (s, srt = false) => {
+      const ms = Math.round(s * 1000);
+      const h = Math.floor(ms / 3600000);
+      const m = Math.floor(ms / 60000) % 60;
+      const sec = Math.floor(ms / 1000) % 60;
+      const pad = (n, l = 2) => String(n).padStart(l, '0');
+      if (srt) return `${pad(h)}:${pad(m)}:${pad(sec)},${pad(ms % 1000, 3)}`;
+      return (h ? `${h}:${pad(m)}` : `${m}`) + `:${pad(sec)}.${Math.floor((ms % 1000) / 100)}`;
+    };
+    const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+    const show = (id, on) => $(id).classList.toggle('hidden', !on);
+
+    // Выбранные модели запоминаем между перезагрузками
+    const remember = (key, value) => { try { localStorage.setItem(key, value); } catch {} };
+    const recall = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
+
+    async function loadModels() {
+      try {
+        const res = await fetch('/api/models');
+        const m = await res.json();
+        if (!res.ok) throw new Error(m.error);
+        const stt = recall('sttModel') || m.defaults.stt;
+        $('sttModel').innerHTML = m.stt
+          .map((x) => `<option value="${esc(x.id)}" ${x.id === stt ? 'selected' : ''}>${esc(x.id)}</option>`)
+          .join('');
+        const sum = recall('summaryModel') ?? m.defaults.summary;
+        $('summaryModel').innerHTML =
+          `<option value="">Без суммари</option>` +
+          m.summary.map((x) => `<option value="${esc(x)}" ${x === sum ? 'selected' : ''}>${esc(x)}</option>`).join('');
+      } catch (e) {
+        $('sttModel').innerHTML = `<option value="openai/whisper-large-v3-turbo">openai/whisper-large-v3-turbo</option>`;
+        console.error('Не удалось загрузить модели', e);
+      }
+    }
+    loadModels();
+    $('sttModel').addEventListener('change', (e) => remember('sttModel', e.target.value));
+    $('summaryModel').addEventListener('change', (e) => remember('summaryModel', e.target.value));
+
+    function setFile(f) {
+      if (!f) return;
+      file = f;
+      $('fileName').textContent = `${f.name} · ${(f.size / 1024 / 1024).toFixed(1)} MB`;
+      $('submit').disabled = false;
+      const url = URL.createObjectURL(f);
+      const isVideo = f.type.startsWith('video');
+      $('playerWrap').innerHTML = isVideo
+        ? `<video controls src="${url}" class="w-full max-h-80 rounded-lg bg-black"></video>`
+        : `<audio controls src="${url}" class="w-full"></audio>`;
+      show('playerWrap', true);
+      media = $('playerWrap').firstElementChild;
+      media.addEventListener('timeupdate', highlight);
+    }
+
+    $('file').addEventListener('change', (e) => setFile(e.target.files[0]));
+    const drop = $('drop');
+    ['dragover', 'dragenter'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('border-indigo-500'); }));
+    ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('border-indigo-500'); }));
+    drop.addEventListener('drop', (e) => setFile(e.dataTransfer.files[0]));
+
+    // На узком экране результат оказывается под формой — докручиваем к нему
+    const revealOutput = () => {
+      if (window.innerWidth < 1024) $('output').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
+    $('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!file) return;
+      show('placeholder', false);
+      show('error', false);
+      show('result', false);
+      show('loading', true);
+      revealOutput();
+      $('submit').disabled = true;
+      const model = $('sttModel').value;
+      const started = Date.now();
+      const update = () => ($('loadingText').textContent = `${model}: обработка… ${Math.round((Date.now() - started) / 1000)} c`);
+      update();
+      const tick = setInterval(update, 500);
+      try {
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('language', $('language').value);
+        fd.append('sttModel', model);
+        fd.append('summaryModel', $('summaryModel').value);
+        const res = await fetch('/api/transcribe', { method: 'POST', body: fd });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || res.statusText);
+        data = json;
+        data.totalMs = Date.now() - started;
+        render();
+      } catch (err) {
+        $('error').textContent = err.message;
+        show('error', true);
+      } finally {
+        clearInterval(tick);
+        show('loading', false);
+        $('submit').disabled = false;
+      }
+    });
+
+    function render() {
+      const t = data.timings;
+      const chip = (label, value) => `<span class="bg-white border border-slate-200 rounded-full px-3 py-1"><span class="text-slate-500">${label}:</span> ${value}</span>`;
+      const sec = (ms) => `${(ms / 1000).toFixed(1)} c`;
+      $('stats').innerHTML = [
+        chip('Модель', esc(data.models.stt)),
+        chip('Длительность', fmt(data.duration)),
+        chip('Язык', esc(data.language || '—')),
+        chip('Сегментов', data.segments.length),
+        chip('Всего', sec(data.totalMs)),
+        chip('Распознавание', sec(t.sttMs) + (t.chunks > 1 ? ` (${t.chunks} чанка)` : '')),
+        chip('Конвертация', sec(t.convertMs)),
+        data.models.summary ? chip('Суммари', sec(t.summaryMs)) : '',
+        chip('Цена STT', `$${data.cost.stt.toFixed(5)}`),
+        data.cost.summary != null ? chip('Цена суммари', `$${data.cost.summary.toFixed(5)}`) : '',
+      ].join('');
+
+      if (data.summary) {
+        $('summary').innerHTML = data.summary.split('\n').filter((l) => l.trim()).map((l) => {
+          const html = esc(l.replace(/^\s*[-*]\s+/, '')).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+          return /^\s*[-*]\s+/.test(l) ? `<div class="pl-4 -indent-3">• ${html}</div>` : `<p>${html}</p>`;
+        }).join('');
+      } else if (data.summaryError) {
+        $('summary').innerHTML = `<p class="text-red-600">${esc(data.summaryError)}</p>`;
+      } else {
+        $('summary').innerHTML = `<p class="text-slate-400">Суммари выключено</p>`;
+      }
+
+      show('noTs', !data.hasTimestamps);
+      $('segments').innerHTML = data.segments.map((s, i) => `
+        <li data-i="${i}" class="seg flex gap-3 py-2 px-2 rounded cursor-pointer hover:bg-slate-50">
+          <span class="font-mono text-xs text-indigo-600 pt-0.5 shrink-0 w-32">${fmt(s.start)} – ${fmt(s.end)}</span>
+          <span class="text-sm">${esc(s.text)}</span>
+        </li>`).join('');
+      document.querySelectorAll('[data-dl="srt"]').forEach((b) => (b.disabled = !data.segments.length));
+      $('text').textContent = data.text;
+      show('result', true);
+      revealOutput();
+    }
+
+    $('segments').addEventListener('click', (e) => {
+      const li = e.target.closest('.seg');
+      if (!li || !media) return;
+      media.currentTime = data.segments[li.dataset.i].start;
+      media.play();
+    });
+
+    function highlight() {
+      if (!data) return;
+      const t = media.currentTime;
+      document.querySelectorAll('.seg').forEach((li) => {
+        const s = data.segments[li.dataset.i];
+        li.classList.toggle('bg-indigo-50', t >= s.start && t < s.end);
+      });
+    }
+
+    function download(name, content) {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([content], { type: 'text/plain' }));
+      a.download = name;
+      a.click();
+    }
+    document.querySelectorAll('[data-dl]').forEach((btn) => btn.addEventListener('click', () => {
+      const base = file.name.replace(/\.[^.]+$/, '');
+      if (btn.dataset.dl === 'srt') {
+        download(`${base}.srt`, data.segments.map((s, i) => `${i + 1}\n${fmt(s.start, true)} --> ${fmt(s.end, true)}\n${s.text}\n`).join('\n'));
+      } else if (data.segments.length) {
+        download(`${base}.txt`, data.segments.map((s) => `[${fmt(s.start)}] ${s.text}`).join('\n'));
+      } else {
+        download(`${base}.txt`, data.text);
+      }
+    }));
+    $('copy').addEventListener('click', async () => {
+      await navigator.clipboard.writeText(data.text);
+      $('copy').textContent = 'Скопировано';
+      setTimeout(() => ($('copy').textContent = 'Копировать текст'), 1500);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+services:
+  app:
+    build: .
+    image: openrouter-stt
+    restart: unless-stopped
+    # Переменные из .env (OPENROUTER_API_KEY, SUMMARY_MODEL) передаются в контейнер при запуске,
+    # в образ они не попадают
+    env_file: .env
+    # Внутри контейнера всегда 3000; наружу — HOST_PORT из окружения или 3000
+    environment:
+      PORT: 3000
+    ports:
+      - "${HOST_PORT:-3000}:3000"
